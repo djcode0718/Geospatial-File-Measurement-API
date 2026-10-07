@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.errors import register_exception_handlers
 from app.api.routes import api_router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
@@ -36,6 +37,9 @@ def create_application() -> FastAPI:
         redoc_url="/redoc",
         openapi_url="/openapi.json",
     )
+
+    # Register global exception handlers
+    register_exception_handlers(app)
 
     # Attach root API router (health and future endpoints)
     app.include_router(api_router)

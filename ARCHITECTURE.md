@@ -462,14 +462,47 @@ erDiagram
 ## 12. API Contracts & Specifications
 
 ### 12.1 `POST /api/files/`
-* **Purpose:** Accepts a multipart file upload (`.zip` Shapefile or `.kml`), initiates ingestion and measurement, and returns file summary.
+* **Purpose:** Accepts a multipart file upload (`.zip` Shapefile or `.kml`), executes validation, CRS resolution, metric measurement, and database persistence.
 * **Content-Type:** `multipart/form-data`
 * **Form Field:** `file` (Binary file)
 * **Response Status Codes:**
-  - `201 Created`: File uploaded and processed successfully.
-  - `400 Bad Request`: Invalid file format, corrupted archive, Zip Slip attempt, or missing shapefile components.
-  - `413 Payload Too Large`: Upload exceeds maximum file size limit (50 MB).
-  - `500 Internal Server Error`: Unhandled system error (returns RFC 7807 JSON).
+  - `201 Created`: File uploaded, measured, and persisted successfully.
+  - `400 Bad Request`: Invalid format, corrupt archive, missing mandatory shapefile components, missing CRS (`.prj`), or XML security violation.
+  - `413 Payload Too Large`: Upload exceeds configured maximum file size limit (50 MB).
+  - `415 Unsupported Media Type`: File extension is unsupported (allowed: `.zip`, `.kml`).
+  - `500 Internal Server Error`: Unhandled system failure (returns sanitized RFC 7807 JSON without leaking internal paths or stack traces).
+
+```mermaid
+flowchart TD
+    A[HTTP POST /api/files/] --> B[Sanitize Filename & Validate Extension]
+    B --> C[Create FileRecord in DB status: PROCESSING]
+    C --> D[Open StagingArea workspace]
+    D --> E[Stream Upload with Chunked Size Check]
+    E --> F{File Type?}
+    F -- .zip --> G[Zip Slip & Bomb Inspection -> Validate Components]
+    F -- .kml --> H[defusedxml XXE & Entity Validation]
+    G --> I[ShapefileReader: ParsedFeature stream]
+    H --> J[KMLReader: ParsedFeature stream]
+    I --> K[MeasurementEngine: Measure Dataset]
+    J --> K
+    K --> L[Atomic DB Transaction: Persist Features & Measurements]
+    L --> M[Update FileRecord status: COMPLETED / COMPLETED_WITH_WARNINGS]
+    M --> N[Staging Area Auto-Cleanup]
+    N --> O[Return 201 Created Response with UUID]
+    
+    L -- Persistence Error / Catastrophic Failure --> P[Rollback Transaction]
+    P --> Q[Mark FileRecord status: FAILED in clean transaction]
+    Q --> N
+    Q --> R[Return 4xx / 500 Error Response]
+```
+
+**Transaction Boundaries & Failure Semantics:**
+1. **Initial File Record:** Created and committed with `status = PROCESSING` prior to heavy I/O to ensure traceable persistence.
+2. **Atomic Persistence:** All `FeatureRecord` and `MeasurementRecord` instances are persisted in a single transactional block. If any catastrophic database or engine error occurs, partial records are rolled back.
+3. **Truthful FAILED Status:** On unrecoverable error, the `FileRecord` is marked `FAILED` with a safe diagnostic message in an isolated transaction.
+4. **Failure Isolation:**
+   - **Feature-Level:** Corrupt geometry topology, unsupported geometry types, or skipped points are isolated at the feature level; valid independent features continue to be measured and persisted.
+   - **Dataset-Level:** Corrupt archives, missing companion files (`.shx`, `.dbf`), missing CRS (`.prj`), or XXE injection cause the entire file ingestion to fail.
 
 **Example Response (`201 Created`):**
 ```json
@@ -483,11 +516,19 @@ erDiagram
   "status": "COMPLETED",
   "created_at": "2026-10-07T12:00:00Z",
   "summary": {
+    "total_features": 120,
+    "measured_features": 105,
+    "skipped_features": 15,
+    "invalid_features": 0,
+    "unsupported_features": 0,
     "polygon_count": 80,
     "linestring_count": 25,
     "point_count": 15,
-    "unsupported_count": 0
-  }
+    "unsupported_count": 0,
+    "total_area_m2": 142050.25,
+    "total_length_m": 8432.10
+  },
+  "error_message": null
 }
 ```
 

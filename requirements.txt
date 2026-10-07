@@ -9,3 +9,4 @@ shapely>=2.0.4
 pyproj>=3.6.1
 fiona>=1.9.6
 fastkml>=1.0
+python-multipart>=0.0.9

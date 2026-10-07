@@ -23,6 +23,7 @@ dependencies = [
     "pyproj>=3.6.1",
     "fiona>=1.9.6",
     "fastkml>=1.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -47,4 +48,4 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N"]
-ignore = ["E501"]
+ignore = ["E501", "B008"]

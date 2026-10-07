@@ -7,8 +7,12 @@ from pathlib import Path
 from types import TracebackType
 
 from app.core.config import get_settings
-from app.core.exceptions import StorageError
-from app.storage.sanitizer import sanitize_filename, validate_file_size
+from app.core.exceptions import (
+    FileSizeLimitExceededError,
+    FileValidationError,
+    StorageError,
+)
+from app.storage.sanitizer import sanitize_filename
 from app.storage.zip_handler import inspect_and_extract_zip
 
 logger = logging.getLogger(__name__)
@@ -40,6 +44,71 @@ class StagingArea:
                 details={"staging_dir": str(self.staging_dir), "error": str(err)},
             ) from err
 
+    def save_upload_stream(
+        self,
+        file_obj: object,
+        filename: str,
+        chunk_size: int = 64 * 1024,
+    ) -> tuple[Path, int]:
+        """Atomically stream uploaded content to input directory with progressive size checking.
+
+        Args:
+            file_obj: File-like object with a .read(chunk_size) method.
+            filename: Raw original filename.
+            chunk_size: Chunk size in bytes for buffered streaming.
+
+        Returns:
+            Tuple of (Path to saved file, total bytes written).
+
+        Raises:
+            FileValidationError: If file is empty or size exceeds limit.
+            StorageError: If disk write fails.
+        """
+        safe_name = sanitize_filename(filename)
+        final_path = self.input_dir / safe_name
+        temp_path = self.input_dir / f"{safe_name}.part.{uuid.uuid4().hex[:8]}"
+
+        settings = get_settings()
+        max_limit = settings.MAX_UPLOAD_SIZE_BYTES
+        total_bytes = 0
+
+        try:
+            with open(temp_path, "wb") as f:
+                while True:
+                    chunk = file_obj.read(chunk_size)
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    if total_bytes > max_limit:
+                        raise FileSizeLimitExceededError(
+                            f"File size ({total_bytes} bytes) exceeds maximum limit of {max_limit} bytes ({max_limit // (1024 * 1024)} MB)",
+                            details={"size_bytes": total_bytes, "max_bytes": max_limit},
+                        )
+                    f.write(chunk)
+                f.flush()
+
+            if total_bytes <= 0:
+                raise FileValidationError(
+                    "Uploaded file is empty (0 bytes)",
+                    details={"size_bytes": 0},
+                )
+
+            # Atomic rename into final staging path
+            temp_path.replace(final_path)
+            return final_path, total_bytes
+
+        except (FileValidationError, FileSizeLimitExceededError):
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+            raise
+        except OSError as err:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+            raise StorageError(
+                f"Failed to write uploaded file to staging: {err}",
+                details={"final_path": str(final_path), "error": str(err)},
+            ) from err
+
     def save_upload(self, raw_bytes: bytes, filename: str) -> Path:
         """Atomically write uploaded bytes to input directory using sanitized filename.
 
@@ -54,27 +123,10 @@ class StagingArea:
             FileValidationError: If size or filename is invalid.
             StorageError: If disk write fails.
         """
-        validate_file_size(len(raw_bytes))
-        safe_name = sanitize_filename(filename)
-        final_path = self.input_dir / safe_name
-        temp_path = self.input_dir / f"{safe_name}.part.{uuid.uuid4().hex[:8]}"
+        import io
 
-        try:
-            with open(temp_path, "wb") as f:
-                f.write(raw_bytes)
-                f.flush()
-
-            # Atomic rename into final staging path
-            temp_path.replace(final_path)
-            return final_path
-
-        except OSError as err:
-            if temp_path.exists():
-                temp_path.unlink(missing_ok=True)
-            raise StorageError(
-                f"Failed to write uploaded file to staging: {err}",
-                details={"final_path": str(final_path), "error": str(err)},
-            ) from err
+        path, _ = self.save_upload_stream(io.BytesIO(raw_bytes), filename)
+        return path
 
     def extract_archive(self, archive_path: Path) -> list[Path]:
         """Safely extract ZIP archive into the extracted directory.
