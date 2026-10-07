@@ -221,6 +221,9 @@ def test_idempotent_reprocessing(test_db_session: Session):
     )
     assert feat_count_2 == 1  # Still exactly 1, no duplicate rows
 
+    meas_count = test_db_session.scalar(select(func.count()).select_from(MeasurementRecord))
+    assert meas_count == 1  # Still exactly 1 measurement record, no orphans
+
     staging.cleanup()
 
 
