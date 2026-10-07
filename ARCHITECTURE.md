@@ -675,8 +675,6 @@ flowchart TD
 }
 ```
 
----
-
 ### 12.4 Standard Error Response Schema (RFC 7807)
 ```json
 {
@@ -691,7 +689,40 @@ flowchart TD
 
 ---
 
-## 13. File Storage Architecture
+## 13. Processing Boundary & Execution Abstraction (Phase 4.1)
+
+### 13.1 Architecture & Flow
+
+```text
+POST /api/files/ (FastAPI Endpoint)
+       │
+       ▼  (FastAPI Dependency Injection)
+ProcessingExecutor (Execution Boundary Protocol)
+       │
+       ▼  (Synchronous Invocation)
+FileProcessingService (Pipeline Orchestrator)
+       ├── StagingArea (Secure disk extraction & sandboxing)
+       ├── ShapefileReader / KMLReader (Vector normalization)
+       ├── CRSResolver & GeometryTransformer (Geodesic/UTM projection)
+       ├── MeasurementEngine (Metric area & length calculation)
+       └── Relational Session (Atomic DB transaction & rollback)
+```
+
+### 13.2 Rationale & Design Decisions
+
+1. **Separation of Concerns:** The HTTP/API transport layer does not orchestrate low-level readers, CRS resolvers, or measurement algorithms directly. Instead, it delegates to `ProcessingExecutor.submit()`.
+2. **Execution Strategy Decoupling:** The execution mechanism ("*how processing is scheduled*") is decoupled from the domain logic ("*how geospatial files are measured*").
+3. **Pluggable Evolution:** If asynchronous execution is introduced in the future (e.g., FastAPI `BackgroundTasks`, Celery, Redis queue), only the executor implementation changes. The underlying geospatial engine, readers, CRS transformers, and persistence transactions require zero modifications.
+4. **Isolated Testability:** Routes can be tested with mock executors via FastAPI's `app.dependency_overrides[get_processing_executor]`, and `FileProcessingService` can be tested independently of HTTP request lifecycles.
+
+### 13.3 Architectural Trade-Offs
+
+- **Synchronous Execution Model (Current):** The processing pipeline executes synchronously within the upload request context. This ensures atomic `201 Created` responses, immediate data availability, simplicity of debugging, and zero external infrastructure dependencies (e.g., Redis, RabbitMQ, Celery workers).
+- **Asynchronous Execution (Intentionally Deferred):** True distributed background execution introduces message serialization, state polling, eventual consistency, and broker management. This is deferred until actual dataset profiling and performance benchmarks demonstrate that upload latency exceeds acceptable synchronous thresholds.
+
+---
+
+## 14. File Storage Architecture
 
 ```
 Staging Root: /tmp/geomeasure_staging/
@@ -710,7 +741,7 @@ Staging Root: /tmp/geomeasure_staging/
 
 ---
 
-## 14. Security Architecture
+## 15. Security Architecture
 
 | Security Threat | Attack Vector | Architectural Mitigation |
 | :--- | :--- | :--- |
@@ -723,7 +754,8 @@ Staging Root: /tmp/geomeasure_staging/
 
 ---
 
-## 15. Testing Architecture
+## 16. Testing Architecture
+
 
 ```mermaid
 graph TD

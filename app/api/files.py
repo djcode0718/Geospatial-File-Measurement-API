@@ -13,8 +13,8 @@ from app.api.schemas import (
     PaginatedFeatureMeasurementsResponse,
 )
 from app.db.session import get_db
+from app.services.executor import ProcessingExecutor, get_processing_executor
 from app.services.file_processing import (
-    FileProcessingService,
     get_file_measurements_page,
     get_file_record,
 )
@@ -51,6 +51,7 @@ router = APIRouter(prefix="/files", tags=["Files"])
 def upload_file(
     file: UploadFile = File(..., description="Geospatial file (.zip Shapefile archive or .kml)"),
     db: Session = Depends(get_db),
+    executor: ProcessingExecutor = Depends(get_processing_executor),
 ) -> FileUploadResponse:
     """Handle multipart file upload, validation, parsing, measurement, and persistence."""
     if not file.filename:
@@ -59,8 +60,7 @@ def upload_file(
             detail="No filename provided in upload payload.",
         )
 
-    service = FileProcessingService()
-    file_record = service.process_file_upload(upload_file=file, db=db)
+    file_record = executor.submit(upload_file=file, db=db)
 
     return FileUploadResponse(
         id=file_record.id,
