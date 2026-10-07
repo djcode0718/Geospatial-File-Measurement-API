@@ -588,23 +588,24 @@ flowchart TD
 ---
 
 ### 12.3 `GET /api/files/{id}/measurements/`
-* **Purpose:** Returns feature-level geometries, attributes, and metric measurements.
-* **Parameters:** `id` (path parameter), optional query params `limit` (default 100, max 1000) and `offset` (default 0).
+* **Purpose:** Returns feature-level geometries, attributes, and metric measurements with database-level pagination.
+* **Parameters:** `id` (path parameter), query parameters `limit` (default 100, min 1, max 1000) and `offset` (default 0, min 0).
 * **Response Status Codes:**
-  - `200 OK`: Measurements retrieved.
-  - `404 Not Found`: File ID does not exist.
+  - `200 OK`: Measurements retrieved successfully.
+  - `400 Bad Request`: Malformed UUID or invalid pagination parameters (e.g. limit < 1, limit > 1000, offset < 0).
+  - `404 Not Found`: File record does not exist for the given UUID.
 
 **Example Response (`200 OK`):**
 ```json
 {
   "file_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "filename": "bangalore_survey.zip",
-  "feature_count": 120,
-  "source_crs": "EPSG:4326",
-  "calculation_crs": "EPSG:32643",
-  "measurements": [
+  "limit": 100,
+  "offset": 0,
+  "total": 120,
+  "items": [
     {
-      "feature_id": 0,
+      "feature_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+      "feature_index": 0,
       "geometry_type": "Polygon",
       "geometry": {
         "type": "Polygon",
@@ -618,21 +619,22 @@ flowchart TD
           ]
         ]
       },
-      "crs": "EPSG:4326",
       "properties": {
         "land_use": "Commercial",
         "sector_id": 104
       },
       "status": "SUCCESS",
+      "warning_message": null,
       "measurement": {
         "type": "area",
         "value": 1184321.45,
-        "unit": "square_meters"
-      },
-      "warning": null
+        "unit": "square_meters",
+        "calculation_crs": "EPSG:32643"
+      }
     },
     {
-      "feature_id": 1,
+      "feature_id": "8c2eeb4e-4c8e-5cbe-aced-3c1e8c4ecb7e",
+      "feature_index": 1,
       "geometry_type": "LineString",
       "geometry": {
         "type": "LineString",
@@ -642,32 +644,32 @@ flowchart TD
           [77.601, 12.981]
         ]
       },
-      "crs": "EPSG:4326",
       "properties": {
         "road_name": "Inner Link Road"
       },
       "status": "SUCCESS",
+      "warning_message": null,
       "measurement": {
         "type": "length",
         "value": 1543.20,
-        "unit": "meters"
-      },
-      "warning": null
+        "unit": "meters",
+        "calculation_crs": "EPSG:32643"
+      }
     },
     {
-      "feature_id": 2,
+      "feature_id": "7d3ffb5f-5d9f-6dcf-bfef-4d2f9d5fdb8f",
+      "feature_index": 2,
       "geometry_type": "Point",
       "geometry": {
         "type": "Point",
         "coordinates": [77.591, 12.971]
       },
-      "crs": "EPSG:4326",
       "properties": {
         "asset_name": "Substation Alpha"
       },
       "status": "SKIPPED_NOT_APPLICABLE",
-      "measurement": null,
-      "warning": null
+      "warning_message": "Point features do not possess metric area or length",
+      "measurement": null
     }
   ]
 }

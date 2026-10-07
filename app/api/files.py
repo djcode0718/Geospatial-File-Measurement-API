@@ -1,16 +1,23 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.schemas import (
     ErrorDetailSchema,
+    FeatureMeasurementItemResponse,
     FileMetadataResponse,
     FileUploadResponse,
+    MeasurementItemResponse,
+    PaginatedFeatureMeasurementsResponse,
 )
 from app.db.session import get_db
-from app.services.file_processing import FileProcessingService, get_file_record
+from app.services.file_processing import (
+    FileProcessingService,
+    get_file_measurements_page,
+    get_file_record,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,4 +124,83 @@ def get_file_metadata(
         error_message=file_record.error_message,
         created_at=file_record.created_at,
         updated_at=file_record.updated_at,
+    )
+
+
+@router.get(
+    "/{id}/measurements/",
+    response_model=PaginatedFeatureMeasurementsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Retrieve paginated feature measurements",
+    description=(
+        "Retrieves a paginated list of persisted vector features and their metric measurements "
+        "(area in m², length in m) for an ingested file dataset, ordered deterministically by feature index."
+    ),
+    responses={
+        200: {
+            "model": PaginatedFeatureMeasurementsResponse,
+            "description": "Paginated feature measurements successfully retrieved.",
+        },
+        400: {
+            "model": ErrorDetailSchema,
+            "description": "Invalid UUID parameter or invalid pagination parameters (e.g., limit < 1, limit > 1000, offset < 0).",
+        },
+        404: {
+            "model": ErrorDetailSchema,
+            "description": "File record not found for given UUID.",
+        },
+        500: {
+            "model": ErrorDetailSchema,
+            "description": "Internal server error.",
+        },
+    },
+)
+def get_file_measurements(
+    id: uuid.UUID,
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum number of features to return per page (1-1000)",
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+        description="Number of features to skip from start of dataset",
+    ),
+    db: Session = Depends(get_db),
+) -> PaginatedFeatureMeasurementsResponse:
+    """Fetch paginated feature-level results and measurements without reprocessing."""
+    features, total = get_file_measurements_page(file_id=id, db=db, limit=limit, offset=offset)
+
+    items: list[FeatureMeasurementItemResponse] = []
+    for feat in features:
+        measurement_item: MeasurementItemResponse | None = None
+        if feat.measurement is not None and feat.measurement.measurement_type is not None:
+            measurement_item = MeasurementItemResponse(
+                type=feat.measurement.measurement_type,
+                value=feat.measurement.measurement_value,
+                unit=feat.measurement.unit or "",
+                calculation_crs=feat.measurement.calculation_crs,
+            )
+
+        items.append(
+            FeatureMeasurementItemResponse(
+                feature_id=feat.id,
+                feature_index=feat.feature_index,
+                geometry_type=feat.geometry_type,
+                geometry=feat.geometry_geojson,
+                properties=feat.properties or {},
+                status=feat.status,
+                warning_message=feat.warning_message,
+                measurement=measurement_item,
+            )
+        )
+
+    return PaginatedFeatureMeasurementsResponse(
+        file_id=str(id),
+        limit=limit,
+        offset=offset,
+        total=total,
+        items=items,
     )

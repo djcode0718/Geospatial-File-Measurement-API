@@ -1,5 +1,9 @@
 """Application services package."""
 
-from app.services.file_processing import FileProcessingService, get_file_record
+from app.services.file_processing import (
+    FileProcessingService,
+    get_file_measurements_page,
+    get_file_record,
+)
 
-__all__ = ["FileProcessingService", "get_file_record"]
+__all__ = ["FileProcessingService", "get_file_measurements_page", "get_file_record"]

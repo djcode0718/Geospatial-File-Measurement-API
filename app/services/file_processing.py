@@ -9,8 +9,8 @@ from typing import Any
 from fastapi import UploadFile
 from shapely.geometry import mapping
 from shapely.geometry.base import BaseGeometry
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.exceptions import (
     AppError,
@@ -279,3 +279,50 @@ def get_file_record(file_id: str | uuid.UUID, db: Session) -> FileRecord:
             details={"file_id": id_str},
         )
     return file_record
+
+
+def get_file_measurements_page(
+    file_id: str | uuid.UUID,
+    db: Session,
+    limit: int = 100,
+    offset: int = 0,
+) -> tuple[list[FeatureRecord], int]:
+    """Retrieve a paginated page of FeatureRecords with eager-loaded MeasurementRecords.
+
+    Args:
+        file_id: UUID string or UUID instance of parent FileRecord.
+        db: Active SQLAlchemy database session.
+        limit: Max items to return (LIMIT).
+        offset: Number of items to skip (OFFSET).
+
+    Returns:
+        Tuple of (list of FeatureRecords with joined measurement, total feature count).
+
+    Raises:
+        FileRecordNotFoundError: If no file record exists for the given ID.
+    """
+    id_str = str(file_id)
+
+    # 1. Confirm FileRecord exists first (raises 404 if not found)
+    get_file_record(file_id=id_str, db=db)
+
+    # 2. Query total feature count at database level
+    total = (
+        db.scalar(
+            select(func.count()).select_from(FeatureRecord).where(FeatureRecord.file_id == id_str)
+        )
+        or 0
+    )
+
+    # 3. Query paginated feature records with joined measurement relationship
+    query = (
+        select(FeatureRecord)
+        .where(FeatureRecord.file_id == id_str)
+        .options(joinedload(FeatureRecord.measurement))
+        .order_by(FeatureRecord.feature_index.asc())
+        .limit(limit)
+        .offset(offset)
+    )
+    features = list(db.scalars(query).unique())
+
+    return features, total

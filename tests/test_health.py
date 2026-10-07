@@ -28,3 +28,9 @@ async def test_openapi_docs_endpoints(async_client: AsyncClient) -> None:
     openapi_data = openapi_response.json()
     assert openapi_data["info"]["title"] == "Geospatial File Measurement API"
     assert openapi_data["info"]["version"] == "0.1.0"
+    assert "/api/files/{id}/measurements/" in openapi_data["paths"]
+    measurements_path = openapi_data["paths"]["/api/files/{id}/measurements/"]["get"]
+    param_names = [p["name"] for p in measurements_path["parameters"]]
+    assert "id" in param_names
+    assert "limit" in param_names
+    assert "offset" in param_names

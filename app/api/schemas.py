@@ -78,6 +78,58 @@ class FileMetadataResponse(BaseModel):
     updated_at: datetime = Field(description="Timestamp when the file was last updated")
 
 
+class MeasurementItemResponse(BaseModel):
+    """Calculated metric measurement for a feature."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    type: str = Field(description="Measurement type (area or length)")
+    value: float = Field(description="Calculated metric measurement value")
+    unit: str = Field(description="Metric unit of measurement (square_meters or meters)")
+    calculation_crs: str | None = Field(
+        default=None, description="Projected CRS used during measurement calculation"
+    )
+
+
+class FeatureMeasurementItemResponse(BaseModel):
+    """Feature geometry and associated metric measurement item."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    feature_id: str = Field(description="Unique UUID identifier for the feature")
+    feature_index: int = Field(description="0-indexed sequence position of feature in dataset")
+    geometry_type: str = Field(description="Geometry type name (Polygon, LineString, Point, etc.)")
+    geometry: dict[str, Any] | None = Field(
+        default=None, description="Standard GeoJSON geometry object representation"
+    )
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="Key-value attribute dictionary"
+    )
+    status: str = Field(
+        description="Feature processing status (SUCCESS, SKIPPED_NOT_APPLICABLE, UNSUPPORTED, INVALID, FAILED)"
+    )
+    warning_message: str | None = Field(
+        default=None, description="Diagnostic warning or repair explanation"
+    )
+    measurement: MeasurementItemResponse | None = Field(
+        default=None, description="Metric measurement details, or null if unmeasured/skipped"
+    )
+
+
+class PaginatedFeatureMeasurementsResponse(BaseModel):
+    """Paginated collection of feature measurements for a dataset."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    file_id: str = Field(description="Unique UUID identifier for the file dataset")
+    limit: int = Field(description="Maximum number of items per page")
+    offset: int = Field(description="Offset of the first item returned")
+    total: int = Field(description="Total number of features in the dataset")
+    items: list[FeatureMeasurementItemResponse] = Field(
+        default_factory=list, description="List of feature measurement items for the current page"
+    )
+
+
 class ErrorDetailSchema(BaseModel):
     """Standard RFC 7807 Problem Details error schema."""
 
