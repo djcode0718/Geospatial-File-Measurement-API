@@ -25,11 +25,15 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
-    # Uploads & Storage (Used in later phases)
+    # Uploads, Storage & Security Limits
     UPLOAD_DIR: str = "/tmp/geomeasure_staging"
     MAX_UPLOAD_SIZE_BYTES: int = 50 * 1024 * 1024  # 50 MB
+    MAX_ZIP_ENTRIES: int = 100
+    MAX_EXTRACTED_SIZE_BYTES: int = 200 * 1024 * 1024  # 200 MB
+    MAX_COMPRESSION_RATIO: float = 100.0  # 100:1 ratio
+    ALLOWED_EXTENSIONS: set[str] = {".zip", ".kml"}
 
-    # Database (Used in Phase 1.2)
+    # Database
     DATABASE_URL: str = "sqlite:///./geomeasure.db"
 
     model_config = SettingsConfigDict(
