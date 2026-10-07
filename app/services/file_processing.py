@@ -227,6 +227,7 @@ class FileProcessingService:
             db.query(FeatureRecord).filter(FeatureRecord.file_id == file_record.id).delete()
 
             # Atomic Database Persistence Transaction
+            feature_records_to_add: list[FeatureRecord] = []
             for feat, res in zip(features, results, strict=True):
                 geojson_geom = geometry_to_geojson(feat.geometry)
                 safe_props = sanitize_json_dict(feat.properties)
@@ -255,7 +256,10 @@ class FileProcessingService:
                     )
                     feature_rec.measurement = meas_rec
 
-                db.add(feature_rec)
+                feature_records_to_add.append(feature_rec)
+
+            if feature_records_to_add:
+                db.add_all(feature_records_to_add)
 
             # Compile summary metrics dict
             summary_metrics = {

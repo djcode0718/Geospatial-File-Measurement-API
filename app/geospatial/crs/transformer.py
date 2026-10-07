@@ -1,15 +1,34 @@
 """Coordinate transformation layer for Shapely geometries using PyProj."""
 
 import logging
+from functools import lru_cache
 
 import pyproj
 import shapely.ops
 from shapely.geometry.base import BaseGeometry
 
-from app.core.exceptions import CRSTransformationError
+from app.core.exceptions import CRSTransformationError, InvalidCRSError, MissingCRSError
 from app.geospatial.crs.validator import validate_crs
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=128)
+def get_cached_pyproj_transformer(
+    source_crs: str, target_crs: str
+) -> tuple[pyproj.Transformer, bool]:
+    """Retrieve or construct a cached PyProj coordinate transformer with axis-order normalization."""
+    source_pyproj = validate_crs(source_crs)
+    target_pyproj = validate_crs(target_crs)
+    is_identity = (source_crs.strip().upper() == target_crs.strip().upper()) or (
+        source_pyproj == target_pyproj
+    )
+    transformer = pyproj.Transformer.from_crs(
+        source_pyproj,
+        target_pyproj,
+        always_xy=True,
+    )
+    return transformer, is_identity
 
 
 class GeometryTransformer:
@@ -26,22 +45,15 @@ class GeometryTransformer:
             InvalidCRSError: If source or target CRS cannot be parsed.
             CRSTransformationError: If transformer cannot be constructed.
         """
-        self.source_pyproj = validate_crs(source_crs)
-        self.target_pyproj = validate_crs(target_crs)
         self.source_str = source_crs
         self.target_str = target_crs
 
-        self._is_identity = (source_crs.strip().upper() == target_crs.strip().upper()) or (
-            self.source_pyproj == self.target_pyproj
-        )
-
         try:
-            # always_xy=True ensures (lon, lat) / (x, y) ordering regardless of authority axis definitions
-            self._transformer = pyproj.Transformer.from_crs(
-                self.source_pyproj,
-                self.target_pyproj,
-                always_xy=True,
+            self._transformer, self._is_identity = get_cached_pyproj_transformer(
+                source_crs, target_crs
             )
+        except (InvalidCRSError, MissingCRSError):
+            raise
         except Exception as err:
             raise CRSTransformationError(
                 f"Failed to create coordinate transformer from '{source_crs}' to '{target_crs}': {err}",
