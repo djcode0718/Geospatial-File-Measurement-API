@@ -100,6 +100,7 @@ async def test_api_upload_with_mock_executor_dependency_override(async_client: A
 
     mock_executor = MagicMock(spec=ProcessingExecutor)
     mock_executor.submit.return_value = mock_record
+    mock_executor.submit_sync.return_value = mock_record
 
     # Override the FastAPI dependency
     app.dependency_overrides[get_processing_executor] = lambda: mock_executor
@@ -117,7 +118,7 @@ async def test_api_upload_with_mock_executor_dependency_override(async_client: A
         assert data["status"] == "COMPLETED"
         assert data["feature_count"] == 10
 
-        assert mock_executor.submit.called
+        assert mock_executor.submit.called or mock_executor.submit_sync.called
     finally:
         app.dependency_overrides.pop(get_processing_executor, None)
 

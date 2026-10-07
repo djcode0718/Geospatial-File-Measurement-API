@@ -1,7 +1,17 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.api.schemas import (
@@ -32,12 +42,17 @@ router = APIRouter(prefix="/files", tags=["Files"])
     description=(
         "Accepts a `.zip` archive containing an ESRI Shapefile or a `.kml` file. "
         "Extracts vector geometries, detects CRS, computes metric area/length measurements, "
-        "and persists the dataset."
+        "and persists the dataset. Supports synchronous processing (default) or background execution "
+        "via `async_mode=true`."
     ),
     responses={
         201: {
             "model": FileUploadResponse,
-            "description": "File successfully uploaded and processed.",
+            "description": "File successfully uploaded and processed synchronously.",
+        },
+        202: {
+            "model": FileUploadResponse,
+            "description": "File accepted and queued for background processing (when async_mode=true).",
         },
         400: {
             "model": ErrorDetailSchema,
@@ -49,7 +64,13 @@ router = APIRouter(prefix="/files", tags=["Files"])
     },
 )
 def upload_file(
+    response: Response,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="Geospatial file (.zip Shapefile archive or .kml)"),
+    async_mode: bool = Query(
+        default=False,
+        description="If true, accept upload immediately (202 Accepted) and process in background.",
+    ),
     db: Session = Depends(get_db),
     executor: ProcessingExecutor = Depends(get_processing_executor),
 ) -> FileUploadResponse:
@@ -60,7 +81,15 @@ def upload_file(
             detail="No filename provided in upload payload.",
         )
 
-    file_record = executor.submit(upload_file=file, db=db)
+    if async_mode:
+        response.status_code = status.HTTP_202_ACCEPTED
+        file_record = executor.submit_background(
+            upload_file=file,
+            db=db,
+            background_tasks=background_tasks,
+        )
+    else:
+        file_record = executor.submit_sync(upload_file=file, db=db)
 
     return FileUploadResponse(
         id=file_record.id,

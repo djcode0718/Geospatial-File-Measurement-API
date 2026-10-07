@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Generator
+from contextlib import contextmanager
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
@@ -62,3 +63,16 @@ def get_db() -> Generator[Session, None, None]:
         raise
     finally:
         db.close()
+
+
+@contextmanager
+def get_db_session() -> Generator[Session, None, None]:
+    """Context manager providing an independent database session for background tasks and workers."""
+    session = SessionLocal()
+    try:
+        yield session
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()

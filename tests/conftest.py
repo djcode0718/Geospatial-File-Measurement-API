@@ -9,6 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.orm import Session, sessionmaker
 
+import app.db.session as db_session
 from app.db.base import Base
 from app.db.session import create_db_engine, get_db
 from app.main import app
@@ -24,13 +25,19 @@ def test_db_session() -> Generator[Session, None, None]:
     engine = create_db_engine(db_url)
     Base.metadata.create_all(bind=engine)
 
-    session_factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    session_factory = sessionmaker(
+        bind=engine, autocommit=False, autoflush=False, expire_on_commit=False
+    )
+    orig_session_local = db_session.SessionLocal
+    db_session.SessionLocal = session_factory
+
     session = session_factory()
 
     try:
         yield session
     finally:
         session.close()
+        db_session.SessionLocal = orig_session_local
         engine.dispose()
         for suffix in ["", "-wal", "-shm", "-journal"]:
             target = Path(f"{db_path}{suffix}")

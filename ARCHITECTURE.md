@@ -689,36 +689,64 @@ flowchart TD
 
 ---
 
-## 13. Processing Boundary & Execution Abstraction (Phase 4.1)
+## 13. Processing Boundary & Execution Architecture (Phase 4.1 & Phase 4.2)
 
 ### 13.1 Architecture & Flow
 
 ```text
-POST /api/files/ (FastAPI Endpoint)
+POST /api/files/?async_mode=false (Default Synchronous Path)
        │
-       ▼  (FastAPI Dependency Injection)
-ProcessingExecutor (Execution Boundary Protocol)
+       ▼
+ProcessingExecutor.submit_sync()
        │
        ▼  (Synchronous Invocation)
-FileProcessingService (Pipeline Orchestrator)
+FileProcessingService.process_file_upload()
        ├── StagingArea (Secure disk extraction & sandboxing)
        ├── ShapefileReader / KMLReader (Vector normalization)
        ├── CRSResolver & GeometryTransformer (Geodesic/UTM projection)
        ├── MeasurementEngine (Metric area & length calculation)
        └── Relational Session (Atomic DB transaction & rollback)
+       │
+       ▼
+HTTP 201 Created (Full metadata & measurements)
+
+
+POST /api/files/?async_mode=true (Asynchronous BackgroundTasks Path)
+       │
+       ▼
+ProcessingExecutor.submit_background()
+       ├── FileProcessingService.prepare_upload_staging()
+       │   └── Saves stream to StagingArea, creates FileRecord(status=PROCESSING)
+       └── FastAPI BackgroundTasks.add_task(run_background_processing_task)
+       │
+       ▼
+HTTP 202 Accepted (Initial FileRecord with status=PROCESSING)
+       │
+       ▼  (In-Process Background Execution after Response Sent)
+run_background_processing_task()
+       ├── Independent DB Session via get_db_session() Context Manager
+       ├── FileProcessingService.process_staged_dataset()
+       │   ├── Parse, Reproject, Measure
+       │   └── Single Atomic DB Transaction (FeatureRecords + MeasurementRecords)
+       ├── Status update -> COMPLETED / COMPLETED_WITH_WARNINGS / FAILED
+       └── finally: StagingArea.cleanup() & DB session.close()
 ```
 
-### 13.2 Rationale & Design Decisions
+### 13.2 Key Design & Safety Guarantees
 
-1. **Separation of Concerns:** The HTTP/API transport layer does not orchestrate low-level readers, CRS resolvers, or measurement algorithms directly. Instead, it delegates to `ProcessingExecutor.submit()`.
-2. **Execution Strategy Decoupling:** The execution mechanism ("*how processing is scheduled*") is decoupled from the domain logic ("*how geospatial files are measured*").
-3. **Pluggable Evolution:** If asynchronous execution is introduced in the future (e.g., FastAPI `BackgroundTasks`, Celery, Redis queue), only the executor implementation changes. The underlying geospatial engine, readers, CRS transformers, and persistence transactions require zero modifications.
-4. **Isolated Testability:** Routes can be tested with mock executors via FastAPI's `app.dependency_overrides[get_processing_executor]`, and `FileProcessingService` can be tested independently of HTTP request lifecycles.
+1. **Database Session Safety:** Request-scoped SQLAlchemy sessions are never passed to or reused by background workers. Background tasks establish an independent session via `get_db_session()` context manager, guaranteeing zero connection leaks or cross-thread data corruption.
+2. **Staging Lifetime & Ownership:** The raw upload stream is safely staged to disk within an isolated UUID workspace before the HTTP request returns. The background task owns the staging lifecycle and guarantees cleanup in a `finally` block.
+3. **Atomic Persistence & Failure Containment:** Feature records and measurements are inserted inside a single database transaction. If background processing encounters an error, changes are rolled back, and the `FileRecord` is marked `FAILED` with a sanitized diagnostic message.
+4. **Transparent Status & Measurements Retrieval:**
+   - While processing: `GET /api/files/{id}/` returns `status: "PROCESSING"`; `GET /api/files/{id}/measurements/` returns `total: 0, items: []`.
+   - Upon completion: `GET /api/files/{id}/` returns `status: "COMPLETED"`; `GET /api/files/{id}/measurements/` returns all calculated metric measurements.
 
-### 13.3 Architectural Trade-Offs
+### 13.3 Architectural Trade-Offs & Limitations
 
-- **Synchronous Execution Model (Current):** The processing pipeline executes synchronously within the upload request context. This ensures atomic `201 Created` responses, immediate data availability, simplicity of debugging, and zero external infrastructure dependencies (e.g., Redis, RabbitMQ, Celery workers).
-- **Asynchronous Execution (Intentionally Deferred):** True distributed background execution introduces message serialization, state polling, eventual consistency, and broker management. This is deferred until actual dataset profiling and performance benchmarks demonstrate that upload latency exceeds acceptable synchronous thresholds.
+- **FastAPI `BackgroundTasks` (In-Process):** Provides zero-dependency, lightweight asynchronous execution for long-running uploads without external infrastructure.
+- **Important Limitation:** In-process background tasks are **not a durable distributed job queue**. If the application process terminates or restarts mid-processing, in-flight tasks can be lost.
+- **Future Production Evolution:** The `ProcessingExecutor` abstraction is intentionally designed so that a durable message broker (e.g. Celery / Redis / RabbitMQ) can replace `BackgroundTasks` in a future scale-out phase without altering any geospatial parsing, projection, or measurement logic.
+
 
 ---
 
