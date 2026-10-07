@@ -180,3 +180,56 @@ class InvalidGeometryError(GeospatialError):
         self, message: str = "Invalid geometry structure", details: dict[str, Any] | None = None
     ) -> None:
         super().__init__(message, code="INVALID_GEOMETRY", details=details)
+
+
+class CRSError(GeospatialError):
+    """Base class for Coordinate Reference System exceptions."""
+
+    def __init__(
+        self, message: str, code: str = "CRS_ERROR", details: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(message, code=code, details=details)
+
+
+class MissingCRSError(CRSError):
+    """Raised when source CRS metadata is missing or unknown."""
+
+    def __init__(
+        self,
+        message: str = "Source CRS is missing or unknown",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code="MISSING_CRS", details=details)
+
+
+class InvalidCRSError(CRSError):
+    """Raised when source or target CRS string/WKT cannot be parsed or validated."""
+
+    def __init__(
+        self,
+        message: str = "Invalid or unparseable CRS definition",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code="INVALID_CRS", details=details)
+
+
+class CRSResolutionError(CRSError):
+    """Raised when an appropriate projected calculation CRS cannot be determined."""
+
+    def __init__(
+        self,
+        message: str = "Unable to determine calculation CRS",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code="CRS_RESOLUTION_ERROR", details=details)
+
+
+class CRSTransformationError(CRSError):
+    """Raised when coordinate reprojection from source to target CRS fails."""
+
+    def __init__(
+        self,
+        message: str = "Coordinate reprojection failed",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code="CRS_TRANSFORMATION_ERROR", details=details)

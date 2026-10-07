@@ -306,35 +306,53 @@ stateDiagram-v2
 ### 9.1 The Fundamental Geospatial Problem
 Geographic coordinates (`EPSG:4326` WGS 84) represent points on an angular ellipsoid in degrees. Computing Euclidean distance $\sqrt{\Delta x^2 + \Delta y^2}$ or polygon area $\frac{1}{2} \sum (x_i y_{i+1} - x_{i+1} y_i)$ on raw degrees produces **degrees and square degrees**, which are geometrically meaningless and introduce severe distortion proportional to latitude $\cos(\phi)$.
 
-### 9.2 The Solution Algorithm
+### 9.2 The Resolution Algorithm
 To ensure mathematically rigorous metric calculations, the system employs the following deterministic CRS resolution algorithm:
 
 ```mermaid
 flowchart TD
-    A[Inspect Source CRS] --> B{Source CRS Detected?}
-    B -- No / Missing .prj --> C[Apply Default: EPSG:4326 + Add Warning]
-    B -- Yes --> D{Is Source CRS Projected?}
-    C --> D
-    D -- Yes (Units in Meters) --> E[Use Source CRS Directly for Measurement]
-    D -- No (Units in Degrees / Geographic) --> F[Compute Dataset Bounding Box & Centroid]
-    F --> G{Bounding Box Lon Span <= 6°?}
-    G -- Yes (Local / Regional Extent) --> H[Compute Optimal UTM Zone EPSG:326XX / 327XX]
-    G -- No (Continental / Global Extent) --> I[Select Global Equal-Area Projection EPSG:6933 or Geodesic Area]
-    H --> J[Create PyProj Transformer: Source -> Target Projected CRS]
-    I --> J
-    E --> K[Compute Geometric Metrics in Meters / m²]
-    J --> K
+    A[Inspect Source CRS via PyProj] --> B{Source CRS Valid & Present?}
+    B -- Missing / None --> C[Raise MissingCRSError]
+    B -- Invalid / Unparseable --> D[Raise InvalidCRSError]
+    B -- Valid --> E{Is Source CRS Projected?}
+    E -- Yes (Linear Units in Meters) --> F[Preserve Source Projected CRS without Reprojection]
+    E -- No (Geographic Degrees e.g. EPSG:4326) --> G[Analyze Spatial Extent BoundingBox]
+    G -- Extent Missing --> H[Select Global Equal-Area Fallback EPSG:6933]
+    G -- Extent Present --> I{Latitude >= 84°N or <= -80°S?}
+    I -- Arctic (>= 84°N) --> J[Select Polar Stereographic North EPSG:3413]
+    I -- Antarctic (<= -80°S) --> K[Select Antarctic Polar Stereographic EPSG:3031]
+    I -- Standard Latitudes --> L{Longitude Span <= 6°?}
+    L -- Yes (Local Regional Dataset) --> M[Compute Optimal UTM Zone EPSG:326XX / 327XX]
+    L -- No (Multi-Zone / Broad Dataset) --> N{Measurement Purpose?}
+    N -- Area --> O[Select Global Equal-Area EPSG:6933]
+    N -- Length / General --> P[Select Centroid UTM with Cross-Zone Warning]
+    F --> Q[Construct PyProj Transformer: Source -> Calculation CRS]
+    H --> Q
+    J --> Q
+    K --> Q
+    M --> Q
+    O --> Q
+    P --> Q
+    Q --> R[Reproject Shapely Geometries via GeometryTransformer]
 ```
 
 ### 9.3 UTM Zone Calculation Formula
 For localized geographic datasets, the Universal Transverse Mercator (UTM) zone is calculated deterministically from the dataset centroid longitude ($\lambda$) and latitude ($\phi$):
-$$\text{UTM Zone Number} = \left\lfloor \frac{\lambda + 180}{6} \right\rfloor + 1$$
+$$\text{UTM Zone Number} = \left\lfloor \frac{\lambda + 180}{6} \right\rfloor + 1 \quad (\text{clamped } 1 \dots 60)$$
 $$\text{EPSG Code} = \begin{cases} 32600 + \text{UTM Zone Number} & \text{if } \phi \ge 0 \text{ (Northern Hemisphere)} \\ 32700 + \text{UTM Zone Number} & \text{if } \phi < 0 \text{ (Southern Hemisphere)} \end{cases}$$
 
-### 9.4 Scope & Assumptions
-- **Local Datasets:** Standard survey files (parcels, roads, flight zones) reside within a single UTM zone; UTM projection preserves local conformal distances and minimal area distortion (<0.1%).
-- **Multi-Zone / Global Datasets:** For datasets spanning $>6^\circ$ longitude, the engine logs a warning and uses equal-area projection (`EPSG:6933` / World Cylindrical Equal Area) for areas and geodesic integration for lengths.
-- **Traceability:** Every measurement payload explicitly returns both `source_crs` and `calculation_crs`.
+### 9.4 CRS Policy Matrix
+
+| Scenario | Spatial Characteristics | Measurement Purpose | Selected Calculation CRS | Strategy |
+| :--- | :--- | :--- | :--- | :--- |
+| **Local Geographic** | Extent span $\le 6^\circ$ lon, $-80^\circ \le \phi \le 84^\circ$ | Area or Length | `EPSG:326XX` (North) / `EPSG:327XX` (South) | `LOCAL_UTM` |
+| **Multi-Zone / Broad**| Extent span $> 6^\circ$ lon | Area | `EPSG:6933` (WGS 84 / NSIDC EASE-Grid 2.0 Global) | `GLOBAL_EQUAL_AREA` |
+| **Multi-Zone / Broad**| Extent span $> 6^\circ$ lon | Length | Centroid UTM `EPSG:326XX`/`327XX` (with distortion warning) | `CROSS_ZONE_FALLBACK` |
+| **Arctic Polar** | Latitude $\ge 84^\circ \text{N}$ | Any | `EPSG:3413` (WGS 84 / Polar Stereographic North) | `POLAR_STEREOGRAPHIC` |
+| **Antarctic Polar** | Latitude $\le -80^\circ \text{S}$ | Any | `EPSG:3031` (WGS 84 / Antarctic Polar Stereographic) | `POLAR_STEREOGRAPHIC` |
+| **Already Projected** | Valid linear projection (e.g. State Plane, existing UTM) | Any | Source CRS (e.g. `EPSG:32643`) | `PRESERVED_SOURCE_PROJECTED`|
+| **Missing CRS** | Missing `.prj` or undefined | Any | Raises `MissingCRSError` | Fail-safe |
+| **Invalid CRS** | Corrupted or unparseable string | Any | Raises `InvalidCRSError` | Fail-safe |
 
 ---
 
