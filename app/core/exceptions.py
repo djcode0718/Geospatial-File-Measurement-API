@@ -15,6 +15,29 @@ class AppError(Exception):
         self.details = details or {}
 
 
+class ResourceNotFoundError(AppError):
+    """Raised when a requested entity or record cannot be found."""
+
+    def __init__(
+        self,
+        message: str = "Requested resource not found",
+        code: str = "RESOURCE_NOT_FOUND",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code=code, details=details)
+
+
+class FileRecordNotFoundError(ResourceNotFoundError):
+    """Raised when a FileRecord with the given ID does not exist."""
+
+    def __init__(
+        self,
+        message: str = "The requested file was not found",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code="FILE_NOT_FOUND", details=details)
+
+
 class FileValidationError(AppError):
     """Raised when an uploaded file fails format, type, or integrity validation."""
 

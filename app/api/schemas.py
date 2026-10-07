@@ -51,6 +51,33 @@ class FileUploadResponse(BaseModel):
     )
 
 
+class FileMetadataResponse(BaseModel):
+    """Response schema returned when retrieving persisted file metadata and status."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str = Field(description="Unique UUID identifier for the file dataset")
+    filename: str = Field(description="Original sanitized filename")
+    file_type: str = Field(description="File format type (SHAPEFILE_ZIP or KML)")
+    file_size_bytes: int = Field(description="Size of the uploaded file in bytes")
+    status: str = Field(description="Processing lifecycle status")
+    feature_count: int = Field(description="Total number of extracted features")
+    source_crs: str | None = Field(
+        default=None, description="Original source Coordinate Reference System"
+    )
+    calculation_crs: str | None = Field(
+        default=None, description="Projected Coordinate Reference System used for measurements"
+    )
+    summary: dict[str, Any] | None = Field(
+        default=None, description="Detailed summary metrics and geometry counts"
+    )
+    error_message: str | None = Field(
+        default=None, description="Diagnostic error details if status is FAILED"
+    )
+    created_at: datetime = Field(description="Timestamp when the file was created")
+    updated_at: datetime = Field(description="Timestamp when the file was last updated")
+
+
 class ErrorDetailSchema(BaseModel):
     """Standard RFC 7807 Problem Details error schema."""
 

@@ -535,23 +535,53 @@ flowchart TD
 ---
 
 ### 12.2 `GET /api/files/{id}/`
-* **Purpose:** Returns metadata and processing status for a specific file.
+* **Purpose:** Returns persisted metadata, CRS parameters, summary metrics, and processing lifecycle status for a specific file.
+* **Characteristics:** Strictly read-only; indexed primary key lookup on `files.id`; does not reprocess, recalculate, or mutate database state.
 * **Parameters:** `id` (path parameter, UUID string).
 * **Response Status Codes:**
-  - `200 OK`: File found.
-  - `404 Not Found`: File ID does not exist.
+  - `200 OK`: File metadata found and returned.
+  - `400 Bad Request`: Invalid UUID parameter syntax.
+  - `404 Not Found`: File record does not exist for the provided UUID.
+  - `500 Internal Server Error`: Unhandled database or system failure.
+
+```mermaid
+flowchart TD
+    A[HTTP GET /api/files/{id}/] --> B[Validate UUID Path Parameter]
+    B --> C[Indexed Primary Key Lookup: FileRecord by id]
+    C --> D{FileRecord Exists?}
+    D -- No --> E[Raise FileRecordNotFoundError -> 404 Problem Details]
+    D -- Yes --> F[Map Persisted Attributes -> FileMetadataResponse]
+    F --> G[Return 200 OK Response]
+```
 
 **Example Response (`200 OK`):**
 ```json
 {
   "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "filename": "bangalore_survey.zip",
-  "feature_count": 120,
-  "crs": "EPSG:4326",
+  "file_type": "SHAPEFILE_ZIP",
+  "file_size_bytes": 18432,
   "status": "COMPLETED",
+  "feature_count": 120,
+  "source_crs": "EPSG:32643",
+  "calculation_crs": "EPSG:32643",
+  "summary": {
+    "total_features": 120,
+    "measured_features": 105,
+    "skipped_features": 15,
+    "invalid_features": 0,
+    "unsupported_features": 0,
+    "failed_features": 0,
+    "polygon_count": 80,
+    "linestring_count": 25,
+    "point_count": 15,
+    "unsupported_count": 0,
+    "total_area_m2": 142050.25,
+    "total_length_m": 8432.10
+  },
+  "error_message": null,
   "created_at": "2026-10-07T12:00:00Z",
-  "updated_at": "2026-10-07T12:00:02Z",
-  "error_message": null
+  "updated_at": "2026-10-07T12:00:02Z"
 }
 ```
 

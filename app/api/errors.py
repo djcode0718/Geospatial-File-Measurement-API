@@ -4,6 +4,7 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.core.exceptions import (
@@ -13,6 +14,7 @@ from app.core.exceptions import (
     FileSizeLimitExceededError,
     FileValidationError,
     GeospatialError,
+    ResourceNotFoundError,
     StorageError,
     UnsupportedFileTypeError,
     XMLSecurityError,
@@ -42,6 +44,30 @@ def create_error_response(
 
 def register_exception_handlers(app: FastAPI) -> None:
     """Attach global exception handlers to the FastAPI application."""
+
+    @app.exception_handler(ResourceNotFoundError)
+    async def not_found_handler(request: Request, exc: ResourceNotFoundError) -> JSONResponse:
+        logger.info("Resource not found on %s: %s", request.url.path, exc.message)
+        return create_error_response(
+            status_code=404,
+            title="Not Found",
+            detail=exc.message,
+            instance=request.url.path,
+            error_type=f"https://errors.geomeasure.internal/{exc.code.lower().replace('_', '-')}",
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        logger.warning("Request validation error on %s: %s", request.url.path, exc)
+        return create_error_response(
+            status_code=400,
+            title="Bad Request",
+            detail="Invalid request parameter or payload syntax.",
+            instance=request.url.path,
+            error_type="https://errors.geomeasure.internal/validation-error",
+        )
 
     @app.exception_handler(UnsupportedFileTypeError)
     async def unsupported_file_type_handler(

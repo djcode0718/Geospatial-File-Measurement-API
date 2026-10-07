@@ -9,10 +9,13 @@ from typing import Any
 from fastapi import UploadFile
 from shapely.geometry import mapping
 from shapely.geometry.base import BaseGeometry
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
     AppError,
+    FileRecordNotFoundError,
+    MissingCRSError,
     UnsupportedFileTypeError,
 )
 from app.db.models import (
@@ -152,8 +155,6 @@ class FileProcessingService:
 
                 # If a Shapefile is missing .prj, reject dataset explicitly
                 if file_type == FileType.SHAPEFILE_ZIP and not metadata.source_crs:
-                    from app.core.exceptions import MissingCRSError
-
                     raise MissingCRSError(
                         "Source CRS is missing or unknown. Shapefile archive must include a valid .prj file.",
                         details={"file_id": file_id, "filename": safe_filename},
@@ -255,3 +256,26 @@ class FileProcessingService:
             db.refresh(file_record)
 
             raise
+
+
+def get_file_record(file_id: str | uuid.UUID, db: Session) -> FileRecord:
+    """Retrieve a persisted FileRecord by primary key UUID.
+
+    Args:
+        file_id: UUID string or UUID instance.
+        db: Active SQLAlchemy database session.
+
+    Returns:
+        FileRecord database model instance.
+
+    Raises:
+        FileRecordNotFoundError: If no file record exists for the given ID.
+    """
+    id_str = str(file_id)
+    file_record = db.scalar(select(FileRecord).where(FileRecord.id == id_str))
+    if file_record is None:
+        raise FileRecordNotFoundError(
+            f"File with ID '{id_str}' was not found.",
+            details={"file_id": id_str},
+        )
+    return file_record
