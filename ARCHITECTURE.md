@@ -358,23 +358,50 @@ $$\text{EPSG Code} = \begin{cases} 32600 + \text{UTM Zone Number} & \text{if } \
 
 ## 10. Measurement Engine Architecture
 
-### 10.1 Measurement Handlers
-The measurement engine utilizes a clean Dispatcher pattern without unnecessary abstraction:
+### 10.1 Complete Geospatial Processing Pipeline
 
-| Geometry Type | Handler Strategy | Calculation Method | Units |
-| :--- | :--- | :--- | :--- |
-| **Polygon** | `PolygonMeasurementHandler` | Transforms exterior and interior rings to target metric CRS; calculates `shapely.Polygon.area`. | $m^2$ (Square Meters) |
-| **MultiPolygon** | `MultiPolygonMeasurementHandler` | Transforms all constituent polygons; computes sum of individual polygon areas. | $m^2$ (Square Meters) |
-| **LineString** | `LineStringMeasurementHandler` | Transforms vertices to target metric CRS; calculates `shapely.LineString.length`. | $m$ (Linear Meters) |
-| **MultiLineString** | `MultiLineStringMeasurementHandler`| Transforms all line components; computes sum of segment lengths. | $m$ (Linear Meters) |
-| **Point / MultiPoint**| `PointMeasurementHandler` | Marks feature as `SKIPPED_NOT_APPLICABLE`; returns `measurement: null`. | `null` |
-| **GeometryCollection**| `CollectionHandler` | Recursively sums measurable sub-geometries or returns detailed warning. | Varies |
-| **Unsupported (TIN, etc.)**| `FallbackHandler` | Marks feature as `UNSUPPORTED_GEOMETRY`; returns `measurement: null`. | `null` |
+```mermaid
+flowchart TD
+    A[Secure File Staging Layer] --> B[Format Vector Reader Shapefile / KML]
+    B --> C[ParsedFeature Stream / BoundingBox]
+    C --> D[CRSResolver Purpose-Aware Selection]
+    D --> E[CRSResolution Decision & Strategy]
+    E --> F[CoordinateTransformer PyProj / Shapely]
+    F --> G[MeasurementDispatcher]
+    G --> H[PolygonHandler: Area in m²]
+    G --> I[LineStringHandler: Length in m]
+    G --> J[PointHandler: Explicit Skip]
+    G --> K[GeometryCollectionHandler: Homogeneous / Rejection]
+    G --> L[UnsupportedHandler: Warning & Skip]
+    H --> M[MeasurementResult Record]
+    I --> M
+    J --> M
+    K --> M
+    L --> M
+    M --> N[MeasurementSummary Dataset Metrics]
+```
 
-### 10.2 Precision & Rounding Policy
-- **Area:** Rounded to 2 decimal places ($0.01 \text{ m}^2$ precision).
-- **Length:** Rounded to 2 decimal places ($0.01 \text{ m}$ precision).
-- **Coordinate Preservation:** Original GeoJSON coordinates preserved verbatim in their source CRS for visual fidelity.
+### 10.2 Measurement Handlers & Policies
+
+The measurement engine utilizes a clean Dispatcher pattern with feature-level failure isolation:
+
+| Geometry Type | Handler Strategy | CRS Purpose | Calculation Method | Unit | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Polygon** | `PolygonMeasurementHandler` | `AREA` | Reprojects to projected CRS; calculates `shapely.Polygon.area` (interior holes reduce area automatically). | `square_meters` | `SUCCESS` |
+| **MultiPolygon** | `PolygonMeasurementHandler` | `AREA` | Reprojects to projected CRS; calculates cumulative `shapely.MultiPolygon.area`. | `square_meters` | `SUCCESS` |
+| **LineString** | `LineStringMeasurementHandler` | `LENGTH` | Reprojects to projected CRS; calculates `shapely.LineString.length`. | `meters` | `SUCCESS` |
+| **MultiLineString** | `LineStringMeasurementHandler` | `LENGTH` | Reprojects to projected CRS; calculates cumulative `shapely.MultiLineString.length`. | `meters` | `SUCCESS` |
+| **Point / MultiPoint** | `PointMeasurementHandler` | N/A | Points have no meaningful area/distance; explicitly skipped without fabricating numbers. | `null` | `SKIPPED_NOT_APPLICABLE` |
+| **GeometryCollection (Homogeneous Polygons)** | `GeometryCollectionHandler` | `AREA` | Reprojects and calculates combined polygon area. | `square_meters` | `SUCCESS` |
+| **GeometryCollection (Homogeneous Lines)** | `GeometryCollectionHandler` | `LENGTH` | Reprojects and calculates combined linestring length. | `meters` | `SUCCESS` |
+| **GeometryCollection (Mixed Types)** | `GeometryCollectionHandler` | N/A | Refuses to combine incompatible units ($m^2$ and $m$); returns diagnostic warning. | `null` | `UNSUPPORTED` |
+| **Unsupported (TIN, Polyhedral, etc.)** | `UnsupportedGeometryHandler` | N/A | Preserves dataset execution; flags feature with diagnostic warning. | `null` | `UNSUPPORTED` |
+
+### 10.3 Key Measurement Invariants
+1. **No Geographic Coordinate Measurement:** Raw angular degree coordinates (`EPSG:4326`) are never measured directly. All coordinates are projected to a metric planar system (`LOCAL_UTM`, `GLOBAL_EQUAL_AREA`, or `POLAR_STEREOGRAPHIC`) prior to calculating area or length.
+2. **Feature-Level Failure Isolation:** If a single feature has missing CRS, corrupt topology, or an unsupported geometry, the measurement handler records a `FAILED` or `INVALID` status with actionable diagnostic warnings without crashing dataset-level processing.
+3. **Immutability:** Original geometry coordinates and source CRS representations are never mutated during transformation or measurement.
+4. **Unrounded Raw Numerical Precision:** Raw floating-point values are retained internally in `MeasurementResult`; formatting and rounding are applied only at API presentation boundaries.
 
 ---
 

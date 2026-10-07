@@ -11,6 +11,18 @@ from app.geospatial.crs import (
     transform_geometry,
     validate_crs,
 )
+from app.geospatial.measurement import (
+    BaseMeasurementHandler,
+    GeometryCollectionHandler,
+    LineStringMeasurementHandler,
+    MeasurementEngine,
+    MeasurementResult,
+    MeasurementSummary,
+    MeasurementUnit,
+    PointMeasurementHandler,
+    PolygonMeasurementHandler,
+    UnsupportedGeometryHandler,
+)
 from app.geospatial.models import DatasetMetadata, ParsedFeature
 from app.geospatial.readers import BaseVectorReader, KMLReader, ShapefileReader
 
@@ -29,4 +41,14 @@ __all__ = [
     "transform_geometry",
     "validate_crs",
     "normalize_crs_string",
+    "MeasurementEngine",
+    "BaseMeasurementHandler",
+    "PolygonMeasurementHandler",
+    "LineStringMeasurementHandler",
+    "PointMeasurementHandler",
+    "GeometryCollectionHandler",
+    "UnsupportedGeometryHandler",
+    "MeasurementResult",
+    "MeasurementSummary",
+    "MeasurementUnit",
 ]

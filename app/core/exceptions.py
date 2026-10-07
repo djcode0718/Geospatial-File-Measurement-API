@@ -182,6 +182,18 @@ class InvalidGeometryError(GeospatialError):
         super().__init__(message, code="INVALID_GEOMETRY", details=details)
 
 
+class MeasurementError(GeospatialError):
+    """Raised when geometric metric calculation fails."""
+
+    def __init__(
+        self,
+        message: str = "Measurement calculation failed",
+        code: str = "MEASUREMENT_ERROR",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code=code, details=details)
+
+
 class CRSError(GeospatialError):
     """Base class for Coordinate Reference System exceptions."""
 
