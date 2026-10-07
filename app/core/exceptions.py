@@ -139,3 +139,44 @@ class StorageError(AppError):
         self, message: str = "Storage operation failed", details: dict[str, Any] | None = None
     ) -> None:
         super().__init__(message, code="STORAGE_ERROR", details=details)
+
+
+class GeospatialError(AppError):
+    """Base class for all geospatial processing exceptions."""
+
+    def __init__(
+        self,
+        message: str,
+        code: str = "GEOSPATIAL_ERROR",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code=code, details=details)
+
+
+class GeospatialParseError(GeospatialError):
+    """Raised when a vector layer or dataset cannot be parsed."""
+
+    def __init__(
+        self,
+        message: str = "Failed to parse geospatial data",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code="GEOSPATIAL_PARSE_ERROR", details=details)
+
+
+class UnsupportedGeometryError(GeospatialError):
+    """Raised when an unsupported geometry type is encountered."""
+
+    def __init__(
+        self, message: str = "Unsupported geometry type", details: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(message, code="UNSUPPORTED_GEOMETRY", details=details)
+
+
+class InvalidGeometryError(GeospatialError):
+    """Raised when a geometry is topologically corrupt or cannot be constructed."""
+
+    def __init__(
+        self, message: str = "Invalid geometry structure", details: dict[str, Any] | None = None
+    ) -> None:
+        super().__init__(message, code="INVALID_GEOMETRY", details=details)

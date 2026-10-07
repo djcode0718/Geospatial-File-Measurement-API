@@ -5,3 +5,7 @@ pydantic-settings>=2.2.0
 sqlalchemy>=2.0.30
 alembic>=1.13.1
 defusedxml>=0.7.1
+shapely>=2.0.4
+pyproj>=3.6.1
+fiona>=1.9.6
+fastkml>=1.0
