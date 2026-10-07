@@ -71,9 +71,19 @@ def inspect_and_extract_zip(
                 )
 
             total_uncompressed = 0
+            seen_entries: set[str] = set()
 
             # 2. Pre-inspection pass on all entries before writing any file
             for entry in entries:
+                # Detect duplicate or colliding entry names in the archive
+                norm_entry = entry.filename.strip("/\\").lower()
+                if norm_entry in seen_entries:
+                    raise ArchiveSecurityError(
+                        f"Duplicate or colliding entry detected in archive: {entry.filename}",
+                        details={"entry": entry.filename},
+                    )
+                seen_entries.add(norm_entry)
+
                 # A. Detect symlinks via Unix file mode attributes
                 # High 16 bits of external_attr store POSIX file permissions
                 mode = entry.external_attr >> 16

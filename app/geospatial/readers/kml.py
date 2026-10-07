@@ -1,4 +1,5 @@
 import logging
+import math
 import re
 from collections.abc import Iterator
 from pathlib import Path
@@ -17,7 +18,8 @@ from shapely.geometry import (
 )
 from shapely.geometry.base import BaseGeometry
 
-from app.core.exceptions import GeospatialParseError
+from app.core.config import get_settings
+from app.core.exceptions import GeospatialParseError, ResourceLimitExceededError
 from app.geospatial.models import ParsedFeature
 from app.geospatial.readers.base import BaseVectorReader
 from app.storage.xml_validator import validate_kml_xml_safety
@@ -46,6 +48,7 @@ class KMLReader(BaseVectorReader):
 
         Raises:
             GeospatialParseError: If KML cannot be opened or parsed.
+            ResourceLimitExceededError: If feature count exceeds configured limit.
         """
         if not file_path.exists():
             raise GeospatialParseError(f"KML file does not exist at '{file_path}'")
@@ -57,6 +60,8 @@ class KMLReader(BaseVectorReader):
 
             root = ElementTree.fromstring(raw_bytes)
         except Exception as err:
+            if isinstance(err, (GeospatialParseError, ResourceLimitExceededError)):
+                raise
             raise GeospatialParseError(
                 f"Failed to parse KML at '{file_path.name}': {err}",
                 details={"file": str(file_path), "error": str(err)},
@@ -64,9 +69,16 @@ class KMLReader(BaseVectorReader):
 
         # In standard KML, CRS is defined as WGS 84 (EPSG:4326) longitude/latitude
         source_crs = "EPSG:4326"
+        settings = get_settings()
+        max_features = settings.MAX_FEATURES_PER_FILE
 
         # Find all Placemark elements across any namespace
         placemarks = self._find_all_tags(root, "Placemark")
+        if len(placemarks) > max_features:
+            raise ResourceLimitExceededError(
+                f"KML document contains {len(placemarks)} features, exceeding maximum limit of {max_features}",
+                details={"feature_count": len(placemarks), "max_features": max_features},
+            )
 
         for idx, placemark in enumerate(placemarks):
             try:
@@ -106,6 +118,8 @@ class KMLReader(BaseVectorReader):
                 )
 
             except Exception as err:
+                if isinstance(err, ResourceLimitExceededError):
+                    raise
                 logger.warning(
                     "Error parsing Placemark index %d in %s: %s", idx, file_path.name, err
                 )
@@ -226,6 +240,9 @@ class KMLReader(BaseVectorReader):
         if coord_elem is None or not coord_elem.text:
             return []
 
+        settings = get_settings()
+        max_coords = settings.MAX_COORDINATES_PER_GEOMETRY
+
         coords_text = coord_elem.text.strip()
         tuples = re.split(r"[\s\n\r\t]+", coords_text)
         parsed_coords: list[tuple[float, float]] = []
@@ -238,7 +255,15 @@ class KMLReader(BaseVectorReader):
                 try:
                     lon = float(parts[0].strip())
                     lat = float(parts[1].strip())
+                    # Discard non-finite numbers (NaN, Inf)
+                    if not math.isfinite(lon) or not math.isfinite(lat):
+                        continue
                     parsed_coords.append((lon, lat))
+                    if len(parsed_coords) > max_coords:
+                        raise ResourceLimitExceededError(
+                            f"Geometry coordinate count exceeds maximum limit of {max_coords}",
+                            details={"max_coordinates": max_coords},
+                        )
                 except ValueError:
                     continue
 

@@ -77,6 +77,17 @@ class InvalidFilenameError(FileValidationError):
         super().__init__(message, code="INVALID_FILENAME", details=details)
 
 
+class ResourceLimitExceededError(FileValidationError):
+    """Raised when feature count, coordinate count, or payload size exceeds safety thresholds."""
+
+    def __init__(
+        self,
+        message: str = "Resource limit exceeded",
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code="RESOURCE_LIMIT_EXCEEDED", details=details)
+
+
 class ArchiveSecurityError(AppError):
     """Base class for archive security and extraction failures."""
 

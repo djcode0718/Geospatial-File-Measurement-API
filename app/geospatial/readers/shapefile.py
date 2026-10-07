@@ -6,9 +6,11 @@ from pathlib import Path
 
 import fiona
 import pyproj
+import shapely
 from shapely.geometry import shape
 
-from app.core.exceptions import GeospatialParseError
+from app.core.config import get_settings
+from app.core.exceptions import GeospatialParseError, ResourceLimitExceededError
 from app.geospatial.models import ParsedFeature
 from app.geospatial.readers.base import BaseVectorReader
 
@@ -39,15 +41,32 @@ class ShapefileReader(BaseVectorReader):
 
         Raises:
             GeospatialParseError: If file cannot be opened or is fundamentally corrupt.
+            ResourceLimitExceededError: If feature count exceeds configured limit.
         """
         if not file_path.exists():
             raise GeospatialParseError(f"Shapefile does not exist at '{file_path}'")
+
+        settings = get_settings()
+        max_features = settings.MAX_FEATURES_PER_FILE
+        max_coords = settings.MAX_COORDINATES_PER_GEOMETRY
 
         try:
             with fiona.open(str(file_path), "r") as src:
                 source_crs = self._extract_crs_string(src)
 
+                # Check total layer feature count upfront if available
+                if len(src) > max_features:
+                    raise ResourceLimitExceededError(
+                        f"Shapefile layer contains {len(src)} features, exceeding maximum limit of {max_features}",
+                        details={"feature_count": len(src), "max_features": max_features},
+                    )
+
                 for idx, feat in enumerate(src):
+                    if idx >= max_features:
+                        raise ResourceLimitExceededError(
+                            f"Shapefile feature count exceeds maximum limit of {max_features}",
+                            details={"feature_count": idx + 1, "max_features": max_features},
+                        )
                     try:
                         feature_id = feat.id if hasattr(feat, "id") else idx
                         props = dict(feat.properties) if feat.properties else {}
@@ -67,6 +86,18 @@ class ShapefileReader(BaseVectorReader):
 
                         # Convert GeoJSON-like dict to Shapely geometry
                         geom = shape(feat.geometry)
+                        coord_count = shapely.get_num_coordinates(geom)
+
+                        if coord_count > max_coords:
+                            raise ResourceLimitExceededError(
+                                f"Feature geometry coordinate count ({coord_count}) exceeds maximum limit of {max_coords}",
+                                details={
+                                    "feature_index": idx,
+                                    "coordinate_count": coord_count,
+                                    "max_coordinates": max_coords,
+                                },
+                            )
+
                         geom_type = geom.geom_type
                         is_valid = geom.is_valid
                         warning = (
@@ -104,7 +135,7 @@ class ShapefileReader(BaseVectorReader):
                         )
 
         except Exception as err:
-            if isinstance(err, GeospatialParseError):
+            if isinstance(err, (GeospatialParseError, ResourceLimitExceededError)):
                 raise
             raise GeospatialParseError(
                 f"Failed to read Shapefile at '{file_path.name}': {err}",

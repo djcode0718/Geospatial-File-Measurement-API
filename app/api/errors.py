@@ -129,7 +129,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         return create_error_response(
             status_code=500,
             title="Internal Server Error",
-            detail=exc.message,
+            detail="An internal error occurred during request processing.",
             instance=request.url.path,
             error_type=f"https://errors.geomeasure.internal/{exc.code.lower().replace('_', '-')}",
         )

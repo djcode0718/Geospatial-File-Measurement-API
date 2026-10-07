@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     MAX_ZIP_ENTRIES: int = 100
     MAX_EXTRACTED_SIZE_BYTES: int = 200 * 1024 * 1024  # 200 MB
     MAX_COMPRESSION_RATIO: float = 100.0  # 100:1 ratio
+    # Resource & Ingestion Safety Limits
+    MAX_FEATURES_PER_FILE: int = 50_000
+    MAX_COORDINATES_PER_GEOMETRY: int = 500_000
+    MAX_PROPERTY_PAYLOAD_BYTES: int = 64 * 1024  # 64 KB per feature
     ALLOWED_EXTENSIONS: set[str] = {".zip", ".kml"}
 
     # Database

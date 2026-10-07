@@ -13,6 +13,7 @@ from shapely.geometry.base import BaseGeometry
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.config import get_settings
 from app.core.exceptions import (
     AppError,
     FileRecordNotFoundError,
@@ -37,22 +38,28 @@ from app.storage.zip_handler import validate_shapefile_components
 logger = logging.getLogger(__name__)
 
 
-def sanitize_json_dict(d: dict[str, Any]) -> dict[str, Any]:
-    """Ensure dictionary values are strictly JSON serializable."""
+def sanitize_json_dict(d: dict[str, Any], max_bytes: int | None = None) -> dict[str, Any]:
+    """Ensure dictionary values are strictly JSON serializable and within memory bounds."""
+    settings = get_settings()
+    max_payload = max_bytes or settings.MAX_PROPERTY_PAYLOAD_BYTES
     sanitized: dict[str, Any] = {}
     for k, v in d.items():
-        if isinstance(v, (str, int, float, bool)) or v is None:
-            sanitized[k] = v
+        key_str = str(k)[:100]
+        if isinstance(v, (int, float, bool)) or v is None:
+            sanitized[key_str] = v
+        elif isinstance(v, str):
+            sanitized[key_str] = v[:max_payload]
         elif isinstance(v, (datetime, date)):
-            sanitized[k] = v.isoformat()
+            sanitized[key_str] = v.isoformat()
         elif isinstance(v, (list, tuple)):
-            sanitized[k] = [
-                item.isoformat() if isinstance(item, (datetime, date)) else item for item in v
+            sanitized[key_str] = [
+                item.isoformat() if isinstance(item, (datetime, date)) else str(item)[:1000]
+                for item in v[:100]
             ]
         elif isinstance(v, dict):
-            sanitized[k] = sanitize_json_dict(v)
+            sanitized[key_str] = sanitize_json_dict(v, max_bytes=max_payload // 2)
         else:
-            sanitized[k] = str(v)
+            sanitized[key_str] = str(v)[:max_payload]
     return sanitized
 
 

@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.exceptions import (
     FileSizeLimitExceededError,
     FileValidationError,
+    InvalidFilenameError,
     StorageError,
 )
 from app.storage.sanitizer import sanitize_filename
@@ -66,6 +67,17 @@ class StagingArea:
         """
         safe_name = sanitize_filename(filename)
         final_path = self.input_dir / safe_name
+
+        # Verify filesystem-level containment
+        resolved_final = final_path.resolve()
+        try:
+            resolved_final.relative_to(self.input_dir.resolve())
+        except ValueError as err:
+            raise InvalidFilenameError(
+                f"Filename '{filename}' escapes the staging directory",
+                details={"filename": filename, "resolved": str(resolved_final)},
+            ) from err
+
         temp_path = self.input_dir / f"{safe_name}.part.{uuid.uuid4().hex[:8]}"
 
         settings = get_settings()

@@ -769,16 +769,21 @@ Staging Root: /tmp/geomeasure_staging/
 
 ---
 
-## 15. Security Architecture
+## 15. Security & Resource Exhaustion Architecture
 
 | Security Threat | Attack Vector | Architectural Mitigation |
 | :--- | :--- | :--- |
-| **Zip Slip** | Archive entries containing `../../etc/cron.d/evil` | Canonical path resolution: `os.path.abspath(target_path).startswith(staging_dir)`. Any violation immediately aborts extraction with `SecurityException`. |
-| **Decompression Bomb** | Highly compressed file (1MB expands to 50GB) | Track cumulative uncompressed bytes during extraction stream. Abort if ratio $> 100:1$ or total $> 200 \text{ MB}$. |
-| **Oversized Upload** | Flooding memory with multi-gigabyte uploads | Fast stream size enforcement; rejection at HTTP boundary (50 MB limit). |
-| **XXE Injection** | Malicious KML XML referencing external entities | Use `defusedxml` / `lxml` with `resolve_entities=False`, `no_network=True`, `load_dtd=False`. |
-| **Filename Injection** | Filenames with null bytes, path tokens, or shell commands | Strip filenames to alphanumeric characters, dashes, and underscores using `werkzeug.utils.secure_filename` or internal regex sanitizer. |
-| **Error Leakage** | Exposing internal tracebacks or system paths | Centralized exception middleware intercepts unhandled exceptions and outputs sanitized RFC 7807 JSON. |
+| **Zip Slip** | Archive entries containing `../../etc/cron.d/evil` | Canonical path resolution (`target_path.resolve().relative_to(extract_to)`), POSIX symlink detection, and pre-inspection traversal tokens check. |
+| **Decompression Bomb** | Highly compressed file (1MB expands to 50GB) | Track cumulative uncompressed bytes and per-entry ratios during pre-inspection pass. Abort if ratio $> 100:1$ or total $> 200 \text{ MB}$. |
+| **Archive Collisions** | Archive containing duplicate/colliding entry paths | Strict duplicate detection pass rejects conflicting or duplicate entries inside the archive before extraction. |
+| **Oversized Upload** | Flooding memory with multi-gigabyte uploads | Fast stream size enforcement; progressive chunk-wise rejection at HTTP staging boundary (`MAX_UPLOAD_SIZE_BYTES = 50 MB`). |
+| **Feature Exhaustion** | Uploading files with hundreds of thousands of placemarks | Hard limit on maximum feature count per file (`MAX_FEATURES_PER_FILE = 50,000`) enforced during vector reading. |
+| **Geometry Complexity DoS** | Polygons/LineStrings with millions of coordinate vertices | Geometry vertex count enforcement (`MAX_COORDINATES_PER_GEOMETRY = 500,000`) and non-finite coordinate discard (`NaN`, `Inf`). |
+| **Property Payload Bloat** | Huge attribute dictionaries causing memory/database bloat | Attribute key length limits and property string payload truncation (`MAX_PROPERTY_PAYLOAD_BYTES = 64 KB`). |
+| **XXE & XML Entity Attacks** | Malicious KML referencing external entities or billion-laughs expansion | Parsing through `defusedxml.ElementTree` with entity resolution disabled and strict structure validation. |
+| **Filename Traversal** | Filenames with null bytes, path tokens, or shell commands | NFKD Unicode normalization, ASCII filtering, stripping path separators and leading/trailing dots, regex alphanumeric whitelisting, and staging directory containment verification. |
+| **Information Disclosure** | Exposing internal tracebacks, staging paths, or SQL statements | Centralized RFC 7807 problem detail handlers with sanitized error messages and zero path/traceback leakage in HTTP responses. |
+| **Staging Area Isolation** | Cross-request file leakage or leftover temporary files | UUID-isolated subdirectories under `/tmp/geomeasure_staging/`, atomic `.part` uploads, and guaranteed cleanup in `finally` blocks for both sync and async lifecycles. |
 
 ---
 
