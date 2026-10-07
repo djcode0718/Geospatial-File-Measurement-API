@@ -170,6 +170,13 @@ class FileProcessingService:
                 details={"file_id": file_id},
             )
 
+        logger.info(
+            "Processing pipeline initiated: file_id=%s filename=%s file_type=%s",
+            file_id,
+            filename,
+            file_type.value,
+        )
+
         try:
             staging_inst = staging or StagingArea(operation_id=file_id)
             staged_file_path = Path(staged_path)
@@ -189,6 +196,12 @@ class FileProcessingService:
 
             # Read normalized features and metadata
             features, metadata = reader.read_dataset(target_dataset_path)
+            logger.info(
+                "Dataset parsed successfully: file_id=%s feature_count=%d detected_crs=%s",
+                file_id,
+                len(features),
+                metadata.source_crs,
+            )
 
             # If a Shapefile is missing .prj, reject dataset explicitly
             if file_type == FileType.SHAPEFILE_ZIP and not metadata.source_crs:
@@ -199,6 +212,19 @@ class FileProcessingService:
 
             # Compute metric measurements across features
             results, summary = self.measurement_engine.measure_dataset(features)
+            logger.info(
+                "Geospatial measurements completed: file_id=%s measured=%d skipped=%d invalid=%d unsupported=%d failed=%d calc_crs=%s",
+                file_id,
+                summary.measured_features,
+                summary.skipped_features,
+                summary.invalid_features,
+                summary.unsupported_features,
+                summary.failed_features,
+                summary.calculation_crs,
+            )
+
+            # Idempotency safety: remove any prior features if re-processing occurred
+            db.query(FeatureRecord).filter(FeatureRecord.file_id == file_record.id).delete()
 
             # Atomic Database Persistence Transaction
             for feat, res in zip(features, results, strict=True):
@@ -272,7 +298,7 @@ class FileProcessingService:
 
             duration_ms = (time.perf_counter() - start_time) * 1000
             logger.info(
-                "Successfully processed file_id=%s (%d features, status=%s, duration=%.2fms)",
+                "Processing completed successfully: file_id=%s features=%d status=%s duration_ms=%.2f",
                 file_id,
                 summary.total_features,
                 file_record.status,
@@ -281,11 +307,19 @@ class FileProcessingService:
             return file_record
 
         except Exception as err:
-            logger.warning("Ingestion failed for file_id=%s: %s", file_id, err)
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            safe_error_msg = err.message if isinstance(err, AppError) else str(err)
+            error_code = getattr(err, "code", "UNHANDLED_ERROR")
+            logger.warning(
+                "Processing failed: file_id=%s error_code=%s error=%s duration_ms=%.2f",
+                file_id,
+                error_code,
+                safe_error_msg,
+                duration_ms,
+            )
             db.rollback()
 
             # Mark FileRecord as FAILED in a clean transaction
-            safe_error_msg = err.message if isinstance(err, AppError) else str(err)
             file_record.status = FileStatus.FAILED.value
             file_record.error_message = safe_error_msg
             db.add(file_record)

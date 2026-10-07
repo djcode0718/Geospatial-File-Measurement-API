@@ -747,6 +747,33 @@ run_background_processing_task()
 - **Important Limitation:** In-process background tasks are **not a durable distributed job queue**. If the application process terminates or restarts mid-processing, in-flight tasks can be lost.
 - **Future Production Evolution:** The `ProcessingExecutor` abstraction is intentionally designed so that a durable message broker (e.g. Celery / Redis / RabbitMQ) can replace `BackgroundTasks` in a future scale-out phase without altering any geospatial parsing, projection, or measurement logic.
 
+### 13.4 Failure Lifecycle, Atomic Transactions & Observability
+
+```mermaid
+flowchart TD
+    A[FileRecord: PROCESSING] --> B[Parse Dataset & Read Features]
+    B --> C[Resolve CRS & Calculate Measurements]
+    C --> D{Processing Successful?}
+    D -- Yes: All Valid --> E[Atomic DB Commit: FeatureRecords + MeasurementRecords]
+    E --> F[FileRecord: COMPLETED]
+    D -- Yes: With Anomalies --> G[Atomic DB Commit: Valid Features + Warnings]
+    G --> H[FileRecord: COMPLETED_WITH_WARNINGS]
+    D -- No: Fatal Error / Exception --> I[Database Rollback: Delete Partial Features]
+    I --> J[FileRecord: FAILED with Sanitized error_message]
+    F --> K[Guaranteed Staging Cleanup]
+    H --> K
+    J --> K
+```
+
+#### Structured Observability & Checkpoint Logging
+The pipeline emits structured lifecycle events with timing diagnostics:
+1. `Processing pipeline initiated`: Captures `file_id`, `filename`, `file_type`.
+2. `Dataset parsed successfully`: Captures `file_id`, `feature_count`, `detected_source_crs`.
+3. `Geospatial measurements completed`: Captures `file_id`, counts of `measured`, `skipped`, `invalid`, `unsupported`, and `calculation_crs`.
+4. `Processing completed successfully`: Captures `file_id`, `status`, `duration_ms`.
+5. `Processing failed`: Captures `file_id`, `error_code`, `error_message`, `duration_ms`.
+
+Developer diagnostics (stack traces, internal exception details) are securely logged server-side, while API responses remain strictly sanitized without leaking internal paths or SQL details.
 
 ---
 
